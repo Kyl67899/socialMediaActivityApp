@@ -42,4 +42,4 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
   react next, react dom latest version
   framer-motion latest
   shadnui latest version
-  
+  # socialmediaactivityapp
