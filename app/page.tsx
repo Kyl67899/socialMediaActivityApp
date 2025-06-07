@@ -3,11 +3,12 @@
 import type React from "react"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { motion, AnimatePresence, useMotionValue, useTransform } from "framer-motion"
+import { motion, AnimatePresence, useMotionValue } from "framer-motion"
 import { Settings, Heart, MessageCircle, Clock, RefreshCw, ChevronDown, Check } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import Image from "next/image"
 
 interface ActivityItem {
   id: string
@@ -128,18 +129,6 @@ const itemVariants = {
   },
 }
 
-const pulseVariants = {
-  initial: { scale: 1 },
-  animate: {
-    scale: [1, 1.05, 1],
-    transition: {
-      duration: 2,
-      repeat: Number.POSITIVE_INFINITY,
-      ease: "easeInOut",
-    },
-  },
-}
-
 export default function ActivityApp() {
   const [mounted, setMounted] = useState(false)
   const [selectedFilter, setSelectedFilter] = useState<"all" | "likes" | "comments">("all")
@@ -151,15 +140,6 @@ export default function ActivityApp() {
   const startY = useRef(0)
   const currentY = useRef(0)
   const pullDistance = useMotionValue(0)
-  const pullOpacity = useMotionValue(0)
-  const pullRotation = useMotionValue(0)
-  const pullScale = useMotionValue(0.8)
-
-  useEffect(() => {
-    pullOpacity.set(0)
-    pullRotation.set(0)
-    pullScale.set(0.8)
-  }, [pullDistance])
 
   const todayActivities = activityData.slice(0, 3)
   const thisWeekActivities = activityData.slice(3)
@@ -254,7 +234,6 @@ export default function ActivityApp() {
         <motion.div
           className="absolute top-0 left-0 right-0 flex items-center justify-center py-4 bg-gradient-to-b from-white/90 to-transparent backdrop-blur-sm z-10"
           style={{
-            opacity: pullOpacity,
             y: pullDistance,
           }}
         >
@@ -271,9 +250,7 @@ export default function ActivityApp() {
               </>
             ) : (
               <>
-                <motion.div style={{ rotate: pullRotation, scale: pullScale }}>
-                  <ChevronDown className="w-5 h-5 text-blue-500" />
-                </motion.div>
+                <ChevronDown className="w-5 h-5 text-blue-500" />
                 <span className="text-sm font-medium">
                   {pullDistance.get() > 60 ? "Release to refresh" : "Pull to refresh"}
                 </span>
@@ -397,163 +374,122 @@ function ActivityCard({
   index: number
   onMarkAsRead: (id: string) => void
 }) {
-  const [isHovered, setIsHovered] = useState(false)
-  const [isSwiping, setIsSwiping] = useState(false)
-
-  const swipeX = useMotionValue(0)
-  const swipeOpacity = useTransform(swipeX, [0, 100], [0, 1])
-  const cardScale = useTransform(swipeX, [0, 100], [1, 0.98])
-  const backgroundOpacity = useTransform(swipeX, [0, 100], [0, 1])
+  const [swipeX, setSwipeX] = useState(0)
+  const [isDragging, setIsDragging] = useState(false)
 
   const startX = useRef(0)
   const startY = useRef(0)
-  const isDragging = useRef(false)
 
-  const handlePointerStart = useCallback(
-    (e: React.PointerEvent) => {
+  const handleStart = useCallback(
+    (clientX: number, clientY: number) => {
       if (!activity.isNew) return
 
-      startX.current = e.clientX
-      startY.current = e.clientY
-      isDragging.current = false
-      setIsSwiping(true)
-
-      // Capture pointer to ensure we get all events
-      e.currentTarget.setPointerCapture(e.pointerId)
+      startX.current = clientX
+      startY.current = clientY
+      setIsDragging(true)
     },
     [activity.isNew],
   )
 
-  const handlePointerMove = useCallback(
-    (e: React.PointerEvent) => {
-      if (!isSwiping || !activity.isNew) return
+  const handleMove = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!isDragging || !activity.isNew) return
 
-      const currentX = e.clientX
-      const currentY = e.clientY
-      const deltaX = currentX - startX.current
-      const deltaY = currentY - startY.current
+      const deltaX = clientX - startX.current
+      const deltaY = clientY - startY.current
 
-      // Check if this is a horizontal swipe
-      if (!isDragging.current) {
-        if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
-          isDragging.current = true
-        } else if (Math.abs(deltaY) > 10) {
-          // Vertical scroll detected, cancel swipe
-          setIsSwiping(false)
-          return
-        }
-      }
-
-      if (isDragging.current && deltaX > 0) {
-        e.preventDefault()
-        const distance = Math.min(deltaX * 0.8, 120)
-        swipeX.set(distance)
+      // Only allow horizontal swipe if movement is more horizontal than vertical
+      if (Math.abs(deltaX) > Math.abs(deltaY) && deltaX > 0) {
+        const newSwipeX = Math.min(deltaX, 120)
+        setSwipeX(newSwipeX)
       }
     },
-    [isSwiping, activity.isNew, swipeX],
+    [isDragging, activity.isNew],
   )
 
-  const handlePointerEnd = useCallback(
-    (e: React.PointerEvent) => {
-      if (!isSwiping || !activity.isNew) return
+  const handleEnd = useCallback(() => {
+    if (!isDragging || !activity.isNew) return
 
-      const distance = swipeX.get()
-      setIsSwiping(false)
-      isDragging.current = false
+    setIsDragging(false)
 
-      // Release pointer capture
-      e.currentTarget.releasePointerCapture(e.pointerId)
+    if (swipeX > 60) {
+      // Mark as read
+      setSwipeX(120)
+      setTimeout(() => {
+        onMarkAsRead(activity.id)
+        setSwipeX(0)
+      }, 200)
+    } else {
+      // Snap back
+      setSwipeX(0)
+    }
+  }, [isDragging, activity.isNew, swipeX, activity.id, onMarkAsRead])
 
-      if (distance > 60) {
-        // Mark as read with animation
-        swipeX.set(120)
-        setTimeout(() => {
-          onMarkAsRead(activity.id)
-          swipeX.set(0)
-        }, 200)
-      } else {
-        // Snap back
-        swipeX.set(0)
-      }
+  // Touch events
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      handleStart(e.touches[0].clientX, e.touches[0].clientY)
     },
-    [isSwiping, activity.isNew, activity.id, onMarkAsRead, swipeX],
+    [handleStart],
   )
 
-  // Also add mouse event handlers for desktop testing
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      handleMove(e.touches[0].clientX, e.touches[0].clientY)
+    },
+    [handleMove],
+  )
+
+  const handleTouchEnd = useCallback(() => {
+    handleEnd()
+  }, [handleEnd])
+
+  // Mouse events for desktop testing
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if (!activity.isNew) return
-
-      startX.current = e.clientX
-      startY.current = e.clientY
-      isDragging.current = false
-      setIsSwiping(true)
+      handleStart(e.clientX, e.clientY)
     },
-    [activity.isNew],
+    [handleStart],
   )
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
-      if (!isSwiping || !activity.isNew) return
-
-      const currentX = e.clientX
-      const deltaX = currentX - startX.current
-
-      if (!isDragging.current && Math.abs(deltaX) > 10) {
-        isDragging.current = true
-      }
-
-      if (isDragging.current && deltaX > 0) {
-        e.preventDefault()
-        const distance = Math.min(deltaX * 0.8, 120)
-        swipeX.set(distance)
-      }
+      handleMove(e.clientX, e.clientY)
     },
-    [isSwiping, activity.isNew, swipeX],
+    [handleMove],
   )
 
   const handleMouseUp = useCallback(() => {
-    if (!isSwiping || !activity.isNew) return
+    handleEnd()
+  }, [handleEnd])
 
-    const distance = swipeX.get()
-    setIsSwiping(false)
-    isDragging.current = false
-
-    if (distance > 60) {
-      swipeX.set(120)
-      setTimeout(() => {
-        onMarkAsRead(activity.id)
-        swipeX.set(0)
-      }, 200)
-    } else {
-      swipeX.set(0)
-    }
-  }, [isSwiping, activity.isNew, activity.id, onMarkAsRead, swipeX])
-
-  // Add global mouse up listener when swiping
+  // Global mouse events
   useEffect(() => {
-    if (isSwiping) {
-      const handleGlobalMouseUp = () => handleMouseUp()
-      const handleGlobalMouseMove = (e: MouseEvent) => {
-        if (!activity.isNew) return
-        const currentX = e.clientX
-        const deltaX = currentX - startX.current
+    if (!isDragging) return
 
-        if (isDragging.current && deltaX > 0) {
-          const distance = Math.min(deltaX * 0.8, 120)
-          swipeX.set(distance)
-        }
-      }
-
-      document.addEventListener("mouseup", handleGlobalMouseUp)
-      document.addEventListener("mousemove", handleGlobalMouseMove)
-
-      return () => {
-        document.removeEventListener("mouseup", handleGlobalMouseUp)
-        document.removeEventListener("mousemove", handleGlobalMouseMove)
-      }
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      handleMove(e.clientX, e.clientY)
     }
-  }, [isSwiping, activity.isNew, activity.id, onMarkAsRead, swipeX, handleMouseUp])
+
+    const handleGlobalMouseUp = () => {
+      handleEnd()
+    }
+
+    document.addEventListener("mousemove", handleGlobalMouseMove)
+    document.addEventListener("mouseup", handleGlobalMouseUp)
+
+    return () => {
+      document.removeEventListener("mousemove", handleGlobalMouseMove)
+      document.removeEventListener("mouseup", handleGlobalMouseUp)
+    }
+  }, [isDragging, handleMove, handleEnd])
+
+  // Double-click as alternative for desktop
+  const handleDoubleClick = useCallback(() => {
+    if (activity.isNew) {
+      onMarkAsRead(activity.id)
+    }
+  }, [activity.isNew, activity.id, onMarkAsRead])
 
   return (
     <motion.div
@@ -567,37 +503,35 @@ function ActivityCard({
     >
       {/* Swipe Background */}
       {activity.isNew && (
-        <motion.div
-          className="absolute inset-0 bg-gradient-to-r from-green-400 to-green-500 flex items-center justify-end pr-6 rounded-xl z-0"
-          style={{ opacity: backgroundOpacity }}
+        <div
+          className="absolute inset-0 bg-gradient-to-r from-green-400 to-green-500 flex items-center justify-end pr-6 rounded-xl"
+          style={{
+            opacity: swipeX / 120,
+            transform: `translateX(${Math.max(0, swipeX - 120)}px)`,
+          }}
         >
-          <motion.div className="flex items-center gap-2 text-white" style={{ opacity: swipeOpacity }}>
+          <div className="flex items-center gap-2 text-white">
             <Check className="w-5 h-5" />
             <span className="font-medium text-sm">Mark as read</span>
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       )}
 
       {/* Activity Card */}
-      <motion.div
+      <div
         className={`flex items-center gap-4 p-3 rounded-xl transition-all cursor-pointer group relative z-10 select-none ${activity.isNew ? "bg-blue-50/90 hover:bg-blue-100/90 border border-blue-200/50" : "bg-white hover:bg-gray-50"
           }`}
         style={{
-          x: swipeX,
-          scale: cardScale,
+          transform: `translateX(${swipeX}px)`,
+          transition: isDragging ? "none" : "transform 0.3s ease-out",
         }}
-        whileHover={!isSwiping ? { scale: 1.02, x: 4 } : {}}
-        onHoverStart={() => setIsHovered(true)}
-        onHoverEnd={() => setIsHovered(false)}
-        onPointerDown={handlePointerStart}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerEnd}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        style={{
-          touchAction: activity.isNew ? "pan-y" : "auto",
-        }}
+        onDoubleClick={handleDoubleClick}
       >
         {/* Red dot indicator */}
         <motion.div
@@ -643,15 +577,17 @@ function ActivityCard({
           whileHover={{ scale: 1.1, rotate: 2 }}
           transition={{ duration: 0.3 }}
         >
-          <img src={activity.image || "/placeholder.svg"} alt="Activity photo" className="w-full h-full object-cover" />
-          <motion.div
-            className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity"
-            animate={isHovered ? { opacity: 0.2 } : { opacity: 0 }}
+          <Image
+            src={activity.image || "/placeholder.svg"}
+            alt="Activity photo"
+            width={56}
+            height={56}
+            className="w-full h-full object-cover"
           />
         </motion.div>
 
         {/* Swipe Indicator */}
-        {activity.isNew && !isSwiping && (
+        {activity.isNew && !isDragging && (
           <motion.div
             className="absolute right-2 top-1/2 -translate-y-1/2 text-blue-500"
             animate={{ x: [0, 4, 0] }}
@@ -660,7 +596,14 @@ function ActivityCard({
             <ChevronDown className="w-4 h-4 rotate-[-90deg]" />
           </motion.div>
         )}
-      </motion.div>
+
+        {/* Desktop hint */}
+        {activity.isNew && (
+          <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-black/75 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            Swipe right or double-click
+          </div>
+        )}
+      </div>
     </motion.div>
   )
 }
